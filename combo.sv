@@ -21,8 +21,8 @@ module combo(inout wire [15:0] ARDUINO_IO,
 				 //Some basic variables to either count variables, reset or load the shift registers and the password itself that is stored in memory of the shift registers
 				 logic wentKey = 0;
 				 logic wentCode = 0;
-				 logic reset;
 				 logic load;
+				 logic reset;
 				 logic [3:0] password[5:0];
 				 logic [3:0] password_attempt[5:0];
 				 
@@ -67,20 +67,56 @@ module combo(inout wire [15:0] ARDUINO_IO,
 					else begin
 						load <= 1'b0;
 					end
-					
-					if(password == password_attempt) begin
-						{HEX5, HEX4, HEX3, HEX2, HEX1, HEX0} = OPEN;
-					end
-					else begin 
-						{HEX5, HEX4, HEX3, HEX2, HEX1, HEX0} = LOCKED;
-					end
 				 end
 					
-				//final thing to implement 
+				//final things to implements, we need the 4 states and the state transitions, we need to output the states to the other board to be 
+				//able to read what states its in and act accordingly, a password refresh/keep depending on the state(i.e only storing the password in the shift
+				//register if in the password typing state in unlocked and then doing it into password_attempt otherwise).
 					
+				enum int unsigned {STATE_A = 0,
+										 STATE_B = 1,
+										 STATE_C = 2,
+										 STATE_D = 3}
+										 state,nextState;
+				
+				//Seperate flip flop just to manage states since its a cleaner implementation even tough they may be equivelant
+				always_comb begin
+					nextState = state;
+					case(state)
+						STATE_A: begin
+						   {HEX5, HEX4, HEX3, HEX2, HEX1, HEX0} = OPEN;
+							nextState = STATE_B;
+						end
+						STATE_B: begin
+							if(KEY_ENTER == key_code_sync) begin
+								password = password_attempt;
+								reset = 1;
+								nextState = STATE_C;
+							end
+						end
+						
+						STATE_C: begin
+						   {HEX5, HEX4, HEX3, HEX2, HEX1, HEX0} = LOCKED;
+							nextState = STATE_D;
+						end
+						
+						STATE_D: begin
+							if(KEY_ENTER == key_code_sync & password_attempt == password) begin
+								nextState = STATE_A;
+							end
+							else begin
+								nextState = STATE_C;
+							end
+						end
+					endcase
+				end
 					
-					
-					
+				always_ff @(posedge MAX10_CLK1_50) begin
+					if(key_code_sync == KEY_CANCEL) begin
+						state <= STATE_A;
+					end
+					state <= nextState;
+				end
 			 
 				 //From LSB to MSB we create shift registers to store and shift the password one hexadecimal digit at a time
 				 //Hex 0 
