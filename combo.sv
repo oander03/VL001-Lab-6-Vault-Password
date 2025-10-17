@@ -104,7 +104,7 @@ module combo(inout wire [15:0] ARDUINO_IO,
 							if(KEY_ENTER == key_code_sync & password_attempt == password) begin
 								nextState = STATE_A;
 							end
-							else begin
+							if(KEY_ENTER == key_code_sync & password_attempt != password) begin
 								nextState = STATE_C;
 							end
 						end
