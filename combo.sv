@@ -1,26 +1,33 @@
 module combo(inout wire [15:0] ARDUINO_IO,
-				 input MAX10_CLK1_50,
-				 output [6:0] HEX0,
-				 output [6:0] HEX1,
-				 output [6:0] HEX2,
-				 output [6:0] HEX3,
-				 output [6:0] HEX4,
-				 output [6:0] HEX5);
+				 input  logic MAX10_CLK1_50,
+				 output logic [9:0] LEDR,
+				 output logic [7:0] HEX0,
+				 output logic [7:0] HEX1,
+				 output logic [7:0] HEX2,
+				 output logic [7:0] HEX3,
+				 output logic [7:0] HEX4,
+				 output logic [7:0] HEX5);
 				 
 				 //Creates the key variables that combo is in charge of
 				 logic key_validin;
-				 logic key_validin_sync;
+				 logic key_validin_sync1;
+				 logic key_validin_sync2;
+				 logic key_code_sync1;
+				 logic key_code_sync2;
 				 logic [3:0] key_code;
 				 logic [3:0] key_code_sync;
 				 
+				 assign LEDR[3:0] = password_attempt[0];//{key_validin_sync, key_code_sync};
+				 assign LEDR[7:4] = password_attempt[1];
+				 assign LEDR[9:8] = state;
+				 
 				 
 				 //Assigns them accordingly to the output of the keyboard DE-10
-				 assign key_valdin = ARDUINO_IO [12];
+				 assign key_validin = ARDUINO_IO [12];
 				 assign key_code = ARDUINO_IO [11:8];
 				 
 				 //Some basic variables to either count variables, reset or load the shift registers and the password itself that is stored in memory of the shift registers
-				 logic wentKey = 0;
-				 logic wentCode = 0;
+				 logic key_validin_prev;
 				 logic load;
 				 logic reset;
 				 logic [3:0] password[5:0];
@@ -35,25 +42,22 @@ module combo(inout wire [15:0] ARDUINO_IO,
 				
 				 
 				 always_ff @(posedge MAX10_CLK1_50) begin
-				 //Ensures that its gone through one flip flop before syncing key_validin
-					wentKey <= 1;
-					if (wentKey) begin
-						key_validin_sync <= key_validin;		
-						wentKey <= 0;
-					end
-					
-					//Makes sure that key_validin_sync falls to low before it waits one flip flop to then sync key_code
-					if (~key_validin_sync) begin
-							wentCode <= 1;
-					end
-					
-					if(wentCode) begin
-						key_code_sync <= key_code;
-						wentCode <=0;
-					end
-					
+				 	 key_validin_sync1 <= key_validin;
+					 key_validin_sync2 <= key_validin_sync1;
+
+					 key_code_sync1 <= key_code;
+					 key_code_sync2 <= key_code_sync1;
+						 
+//						 if (key_validin_sync & ~key_validin_prev) begin
+//							  key_code_sync <= key_code; // Capture the valid key code
+//						 end
+//						 
+//						 else begin
+//							  key_code_sync <= 4'h0;     // Clear the code so it's a one-cycle pulse
+//						 end
+					//					
 					//Resets if reset key_code is detected
-					if(KEY_CANCEL == key_code_sync)begin
+					if(KEY_CANCEL == key_code_sync2) begin
 						reset <= 1'b1;
 					end
 					else begin
@@ -61,11 +65,15 @@ module combo(inout wire [15:0] ARDUINO_IO,
 					end
 					
 					//Enables loading if key_code_sync is not 0, and also not * or #
-					if( key_code_sync & key_code_sync != KEY_CANCEL & key_code_sync != KEY_ENTER) begin
+					if( key_code_sync && key_code_sync2 != KEY_CANCEL) begin
 						load <= 1'b1;
 					end
 					else begin
 						load <= 1'b0;
+					end
+					
+					if(state == STATE_B && password_attempt[5] != 0 && key_code_sync2 == KEY_ENTER) begin
+						password <= password_attempt;
 					end
 				 end
 					
@@ -88,9 +96,8 @@ module combo(inout wire [15:0] ARDUINO_IO,
 							nextState = STATE_B;
 						end
 						STATE_B: begin
-							if(KEY_ENTER == key_code_sync) begin
-								password = password_attempt;
-								reset = 1;
+							{HEX5, HEX4, HEX3, HEX2, HEX1, HEX0} = OPEN;
+							if(KEY_ENTER == key_code_sync2 && password_attempt[5] != 0) begin
 								nextState = STATE_C;
 							end
 						end
@@ -101,12 +108,15 @@ module combo(inout wire [15:0] ARDUINO_IO,
 						end
 						
 						STATE_D: begin
-							if(KEY_ENTER == key_code_sync & password_attempt == password) begin
+						   {HEX5, HEX4, HEX3, HEX2, HEX1, HEX0} = LOCKED;
+							if(KEY_ENTER == key_code_sync2 && password_attempt == password) begin
 								nextState = STATE_A;
 							end
-							if(KEY_ENTER == key_code_sync & password_attempt != password) begin
+							
+							if(KEY_ENTER == key_code_sync2 && password_attempt != password) begin
 								nextState = STATE_C;
 							end
+
 						end
 					endcase
 				end
@@ -115,12 +125,14 @@ module combo(inout wire [15:0] ARDUINO_IO,
 					if(key_code_sync == KEY_CANCEL) begin
 						state <= STATE_A;
 					end
-					state <= nextState;
+					else begin
+						state <= nextState;
+					end
 				end
 			 
 				 //From LSB to MSB we create shift registers to store and shift the password one hexadecimal digit at a time
 				 //Hex 0 
-				 shiftreg shift0(.clk(MAX10_CLK1_50), .reset(reset), .load(load),.sin(1'b0), .d(key_code_sync), .q(password_attempt[0]), .sout() );
+				 shiftreg shift0(.clk(MAX10_CLK1_50), .reset(reset), .load(load),.sin(1'b0), .d(key_code_sync2), .q(password_attempt[0]), .sout() );
 				 //Hex 1 
 				 shiftreg shift1(.clk(MAX10_CLK1_50), .reset(reset), .load(load),.sin(1'b0), .d(password_attempt[0]), .q(password_attempt[1]), .sout() );
 				 //Hex 2 
